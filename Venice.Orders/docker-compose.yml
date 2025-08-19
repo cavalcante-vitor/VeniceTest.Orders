@@ -1,0 +1,98 @@
+# version: '3.8'
+services:
+
+# 🔹 SqlServer (Database)
+  sqlserver-venice:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: sqlserver-venice
+    ports:
+      - "1434:1433"
+    volumes:
+      - sqlserver-data:/usr/share/mssql/data
+    environment:
+      ACCEPT_EULA: "Y"
+      SA_PASSWORD: "venice.challenge.2025"
+      MSSQL_PID: "Developer"
+    networks:
+      - network-venice
+
+# 🔹 Mongodb (Database)
+  mongodb-venice:
+    image: mongo:6
+    container_name: mongodb-venice
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    networks:
+      - network-venice
+    volumes:
+      - mongodb-data:/data/db
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: venice.challenge.2025
+
+  # 🔹 Redis (Cache)
+  redis-venice:
+    image: redis:7
+    container_name: redis-venice
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    ports:
+      - '6379:6379'
+    networks:
+      - network-venice
+
+  # 🔹 RabbitMQ (Mensageria)
+  rabbitmq-venice:
+    image: rabbitmq:3-management
+    container_name: rabbitmq-venice
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    ports:
+      - '5672:5672'
+      - '15672:15672'
+    networks:
+      - network-venice
+
+# API
+  orders-api-venice:
+    build:
+      context: .
+      dockerfile: Venice.Orders.Api/Dockerfile
+    container_name: orders-api-venice
+    depends_on:
+      - sqlserver-venice
+      - redis-venice
+      - rabbitmq-venice
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__Default: "Server=sqlserver-venice,1433;Database=venice_orders;User Id=sa;Password=venice.challenge.2025;TrustServerCertificate=True"
+      CachingConfig__RedisEndpoint: "redis-venice:6379"
+      CachingConfig__AbsoluteExpirationInSeconds: 120
+      MessageBroker__Host: "amqp://guest:guest@rabbitmq-venice:5672"
+      MessageBroker__Exchange: "venice.orders"
+      MongoDbSettings__ConnectionString: "mongodb://root:venice.challenge.2025@mongodb-venice:27017"
+      MongoDbSettings__DatabaseName: "venice_orders"
+      Jwt__Key: "venice-key-challenge-2025-para-256bits"
+      Jwt__Issuer: "order"
+      Jwt__Audience: "venice-orders"
+      Jwt__ExpiresInMinutes: 15
+      ApiKey: "challenge-2025"
+    ports:
+      - "8080:8080"
+      - "8081:8081"
+    networks:
+      - network-venice
+      
+networks:
+  network-venice:
+    driver: bridge
+
+volumes:
+  sqlserver-data:
+  redis-data:
+  mongodb-data:
